@@ -2,7 +2,7 @@
 
 A simple Trello-style task board inside WordPress.
 
-Draggable cards, category bubbles, multiple assignees, comments, and images. Administrators can add columns directly on the board; rename, reorder, and remove empty columns in Settings. Card details open in an overlapping side panel and save when you close it. Creating a card closes the panel and places it at the top of its column. Cards and comments use current WordPress profile pictures, with initials as a fallback. Task images can be uploaded or selected directly below the description, separately from comment images. Folderino is optional for organising new task and comment images.
+Draggable cards, category bubbles, multiple assignees, comments, and images. Administrators can add columns directly on the board; rename, reorder, and remove columns from the pencil icon on each column, and Settings save automatically. Archived cards can be deleted for good, and cards that sit in Done for 30 days are archived automatically (changeable in Settings). Card details open in an overlapping side panel and save when you close it. Creating a card closes the panel and places it at the top of its column. Cards and comments use current WordPress profile pictures, with initials as a fallback. Task images can be uploaded or selected directly below the description, separately from comment images. Folderino is optional for organising new task and comment images.
 
 ## Install
 
@@ -18,7 +18,7 @@ Updates preserve cards, comments, settings, and media. Deactivation and uninstal
 
 ## AI agents and MCP
 
-Boardino registers twelve abilities through the official WordPress Abilities API on WordPress 6.9+. On older WordPress versions, the ordinary board still works and the abilities stay inactive. Boardino does not bundle an MCP server: use the official [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter) or another connector that discovers registered WordPress abilities. Authenticate the connector as a WordPress user with board access.
+Boardino registers fifteen abilities through the official WordPress Abilities API on WordPress 6.9+. On older WordPress versions, the ordinary board still works and the abilities stay inactive. Boardino does not bundle an MCP server: use the official [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter) or another connector that discovers registered WordPress abilities. Authenticate the connector as a WordPress user with board access.
 
 All abilities declare input/output schemas, a `boardino` category, core annotations, `meta.show_in_rest`, and `meta.mcp.public`. Public exposure enables discovery; it does **not** allow anonymous board access. Users in the roles selected in Settings retain the same board permissions as the interface. Existing individual access remains until roles are first saved. Adding columns requires `manage_options`. No additional users, media permissions, or tokens are created.
 
@@ -34,10 +34,13 @@ All abilities declare input/output schemas, a `boardino` category, core annotati
 | `boardino/restore-card` | Restore to the end of its column |
 | `boardino/add-comment` | Comment as the authenticated user; optionally attach accessible existing image IDs |
 | `boardino/add-column` | Administrator only: append a column |
+| `boardino/edit-column` | Administrator only: rename a column and/or move it to a position |
+| `boardino/remove-column` | Administrator only: remove a column; blocked while it holds active cards |
+| `boardino/delete-card` | Administrator only, permanent: delete an archived card with its comments and images |
 | `boardino/create-category` | Create a named category with a preset or hex color |
 | `boardino/update-category` | Rename or recolor, with previous values to detect conflicting edits |
 
-Start with `get-board` to obtain IDs, then `list-cards` or `get-card`. Updates, archive and restore require the card’s latest `version`; move and add-column require the latest board `revision`. After a conflict, read again and reassess rather than blindly retrying. No permanent deletion or remote image uploads are exposed. Creation and comments are not idempotent: retrying a completed request creates another record.
+Start with `get-board` to obtain IDs, then `list-cards` or `get-card`. Updates, archive and restore require the card’s latest `version`; move, add-column, edit-column and remove-column require the latest board `revision`. After a conflict, read again and reassess rather than blindly retrying. `delete-card` is permanent and only works on archived cards, so have an agent confirm with you first. Remote image uploads are not exposed. Creation and comments are not idempotent: retrying a completed request creates another record.
 
 For example, call `boardino/create-card` with `{"title":"Review homepage"}`, then `boardino/update-card` with `{"id":123,"version":1,"description":"Check mobile spacing"}` using the ID and version actually returned by creation. Use `category: ""`, `description: ""`, or `assignees: []` to clear those fields. Use `assignees: [1, 2]` for multiple people and `images: [123, 456]` for accessible existing task-image IDs. Card output includes `taskImages`; the legacy `images` comment-image count and single `assignee` fields remain available for existing clients. Existing Media Library images attached to comments keep their original folder.
 

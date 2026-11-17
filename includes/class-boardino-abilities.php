@@ -111,6 +111,14 @@ final class Boardino_Abilities {
             'images' => array( 'type' => 'array', 'items' => self::integer_schema( 'Existing Media Library image ID.' ), 'maxItems' => 10, 'uniqueItems' => true ),
         ), array( 'id' ), $detail, 'add_comment' );
         self::ability( 'add-column', 'Add column', 'Administrator only: append a named column, keeping all existing board settings. Requires the latest board revision. Maximum 30 columns.', array( 'name' => self::text_schema( 'Plain-text column name.', 60, 1 ), 'revision' => $revision ), array( 'name', 'revision' ), self::object_schema( array( 'column' => $named, 'revision' => array( 'type' => 'integer' ) ), array( 'column', 'revision' ) ), 'add_column', false, false, true );
+        self::ability( 'edit-column', 'Edit column', 'Administrator only: rename a column, move it to a zero-based position, or both. Supply at least one of name or position and the latest board revision.', array(
+            'id' => self::text_schema( 'Existing column ID from get-board.', 40, 1 ), 'name' => self::text_schema( 'New plain-text column name.', 60, 1 ),
+            'position' => self::integer_schema( 'Zero-based position in the column order.', 0 ), 'revision' => $revision,
+        ), array( 'id', 'revision' ), self::object_schema( array( 'columns' => self::list_schema( $named ), 'revision' => array( 'type' => 'integer' ) ), array( 'columns', 'revision' ) ), 'edit_column', false, true, true );
+        self::ability( 'remove-column', 'Remove column', 'Administrator only: remove a column. Fails while the column still holds active cards, so move them first. Archived cards in it move to the first remaining column. At least one column must remain. Requires the latest board revision.', array(
+            'id' => self::text_schema( 'Existing column ID from get-board.', 40, 1 ), 'revision' => $revision,
+        ), array( 'id', 'revision' ), self::object_schema( array( 'removed' => array( 'type' => 'string' ), 'revision' => array( 'type' => 'integer' ) ), array( 'removed', 'revision' ) ), 'remove_column', false, true, true );
+        self::ability( 'delete-card', 'Delete card forever', 'Administrator only and permanent: delete an archived card, its comments and the images uploaded to it. This cannot be undone. Only archived cards can be deleted, so archive the card first and confirm with the user before calling this.', array( 'id' => $id ), array( 'id' ), self::object_schema( array( 'deleted' => array( 'type' => 'integer' ) ), array( 'deleted' ) ), 'delete_card', false, true, true );
         self::ability( 'create-category', 'Create category', 'Add a uniquely named category for card labels. Maximum 30 categories. Omitted color defaults to purple.', $category_fields, array( 'name' ), $category_result, 'create_category' );
         self::ability( 'update-category', 'Update category', 'Rename or recolor an existing category. Supply the intended name and color, plus previous_name and previous_color from get-board to protect concurrent edits.', array_merge( $category_fields, array(
             'id' => self::text_schema( 'Existing category ID.', 40, 1 ),
@@ -234,6 +242,9 @@ final class Boardino_Abilities {
     public static function restore_card( $input ) { $input['archived'] = false; return self::card_output( Boardino::update_card( self::request( $input ) ) ); }
     public static function add_comment( $input ) { return self::detail_output( Boardino::add_comment( self::request( $input ) ) ); }
     public static function add_column( $input ) { return Boardino::add_column( self::request( $input ) ); }
+    public static function edit_column( $input ) { return Boardino::edit_column( self::request( $input ) ); }
+    public static function remove_column( $input ) { return Boardino::remove_column( self::request( $input ) ); }
+    public static function delete_card( $input ) { return Boardino::delete_card( self::request( $input ) ); }
     public static function create_category( $input ) { return Boardino::save_category( self::request( $input ) ); }
     public static function update_category( $input ) { return Boardino::save_category( self::request( $input ) ); }
 }
