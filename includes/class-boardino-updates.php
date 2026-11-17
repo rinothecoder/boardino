@@ -133,8 +133,7 @@ final class Boardino_Updates {
         $response = wp_safe_remote_get($url, ['timeout'=>60, 'redirection'=>0, 'stream'=>true, 'filename'=>$file,
             'limit_response_size'=>self::MAX_PACKAGE_BYTES, 'user-agent'=>'Boardino Updater/' . BOARDINO_VERSION,
             'cookies'=>[], 'headers'=>[]]);
-        $handle = fopen($file, 'rb'); $signature = $handle ? fread($handle, 4) : '';
-        if ($handle) { fclose($handle); }
+        $signature = (string) file_get_contents($file, false, null, 0, 4);
         if (is_wp_error($response) || (int)wp_remote_retrieve_response_code($response) !== 200
             || $signature !== "PK\x03\x04" || filesize($file) >= self::MAX_PACKAGE_BYTES) {
             wp_delete_file($file);

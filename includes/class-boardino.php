@@ -50,7 +50,7 @@ final class Boardino {
         if ( $days < 1 || '' === $done ) { return 0; }
         $count = self::mutate( static function() use ( $days, $done ) {
             $limit = time() - $days * DAY_IN_SECONDS; $count = 0;
-            $ids = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'suppress_filters' => true, 'meta_key' => '_bi_column', 'meta_value' => $done, 'meta_query' => array( array( 'key' => '_bi_archived', 'compare' => 'NOT EXISTS' ) ) ) );
+            $ids = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'meta_key' => '_bi_column', 'meta_value' => $done, 'meta_query' => array( array( 'key' => '_bi_archived', 'compare' => 'NOT EXISTS' ) ) ) );
             foreach ( $ids as $id ) {
                 $since = (int) get_post_meta( $id, '_bi_column_since', true );
                 if ( ! $since ) { $since = (int) strtotime( get_post( $id )->post_modified_gmt . ' UTC' ); }
@@ -232,7 +232,7 @@ final class Boardino {
         return array( 'id' => (int) $p->ID, 'title' => $p->post_title, 'description' => $p->post_content, 'column' => get_post_meta( $p->ID, '_bi_column', true ), 'category' => get_post_meta( $p->ID, '_bi_category', true ), 'assignees' => $assignees, 'assigneeUsers' => $people, 'order' => (int) $p->menu_order, 'version' => (int) get_post_meta( $p->ID, '_bi_version', true ), 'archived' => (bool) get_post_meta( $p->ID, '_bi_archived', true ), 'comments' => (int) get_comments( array( 'post_id' => $p->ID, 'type' => 'boardino', 'status' => 'approve', 'count' => true ) ), 'images' => $images );
     }
     public static function board() {
-        $posts = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'orderby' => array( 'menu_order' => 'ASC', 'ID' => 'ASC' ), 'suppress_filters' => true ) );
+        $posts = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'orderby' => array( 'menu_order' => 'ASC', 'ID' => 'ASC' ) ) );
         $settings = self::settings(); unset( $settings['members'], $settings['roles'], $settings['folder_id'] );
         return array( 'settings' => $settings, 'users' => self::users(), 'cards' => array_map( array( __CLASS__, 'card' ), $posts ), 'revision' => self::revision() );
     }
@@ -321,7 +321,7 @@ final class Boardino {
     }
     public static function delete_archived() {
         return self::mutate( static function() {
-            $ids = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'suppress_filters' => true, 'meta_query' => array( array( 'key' => '_bi_archived', 'compare' => 'EXISTS' ) ) ) );
+            $ids = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'meta_query' => array( array( 'key' => '_bi_archived', 'compare' => 'EXISTS' ) ) ) );
             foreach ( $ids as $id ) { self::purge_card( $id ); }
             return array( 'deleted' => count( $ids ) );
         } );
