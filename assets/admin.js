@@ -30,7 +30,7 @@
   const options = (items, selected, empty) => (empty !== undefined ? `<option value="">${esc(empty)}</option>` : '') + items.map(i => `<option value="${esc(i.id)}" ${String(i.id) === String(selected) ? 'selected' : ''}>${esc(i.name)}</option>`).join('');
   let board, panel = null, settingsData = null, saving = false, dragging = false, noticeTimer, lastFocus, mediaFrame = null, mediaOpen = false, imageFocus = null;
   const modalLayer = document.createElement('div'); modalLayer.id = 'bi-modal-layer'; document.getElementById('boardino').appendChild(modalLayer);
-  const filters = {search: '', category: '', person: '', archived: false};
+  const filters = {search: '', category: '', person: '', archived: new URLSearchParams(window.location.search).get('view') === 'archive'};
   let columnDraft = null;
   const namedColors = {purple:'#7c3aed',blue:'#2563eb',green:'#16a34a',orange:'#ea580c',rose:'#e11d48',gray:'#666666'};
   const colorHex = value => {
@@ -119,8 +119,8 @@
     return `<article class="bi-card" data-id="${card.id}"><button type="button" class="bi-card-open" data-action="open" data-id="${card.id}">
       <span class="bi-card-title-row"><span class="bi-card-title" title="${esc(card.title)}">${esc(card.title)}</span></span>
       ${card.description ? `<span class="bi-card-excerpt">${esc(card.description.slice(0, 110))}${card.description.length > 110 ? '…' : ''}</span>` : ''}
-      <span class="bi-card-meta"><span class="bi-card-people-category"><span class="bi-card-avatars">${card.assigneeUsers.map(person => avatarHTML(person.name,person.avatarUrl,'Assigned to '+person.name)).join('')}</span>${category ? `<span class="bi-tag" style="${badgeStyle(category.color)}" title="${esc(category.name)}">${esc(category.name)}</span>` : ''}</span><span class="bi-card-counts">${card.comments ? `<span title="${card.comments} comments">${icon('admin-comments')} ${card.comments}<span class="screen-reader-text"> comments</span></span>` : ''}</span></span>
-    </button></article>`;
+      <span class="bi-card-meta${card.comments ? ' has-comments' : ''}${!card.archived ? ' has-archive' : ''}"><span class="bi-card-people-category"><span class="bi-card-avatars">${card.assigneeUsers.map(person => avatarHTML(person.name,person.avatarUrl,'Assigned to '+person.name)).join('')}</span>${category ? `<span class="bi-tag" style="${badgeStyle(category.color)}" title="${esc(category.name)}">${esc(category.name)}</span>` : ''}</span></span>
+    </button>${!card.archived || card.comments ? `<div class="bi-card-side">${!card.archived ? `<button type="button" class="bi-card-archive" data-action="card-archive" data-id="${card.id}" aria-label="Archive card: ${esc(card.title)}" title="Archive card">${icon('archive')}</button>` : ''}${card.comments ? `<button type="button" class="bi-card-comments" data-action="open" data-id="${card.id}" title="${card.comments} comments">${icon('admin-comments')}<span>${card.comments}</span><span class="screen-reader-text"> comments</span></button>` : ''}</div>` : ''}</article>`;
   }
   function columnComposerHTML() {
     if (!cfg.admin || filters.archived) return '';
@@ -171,11 +171,10 @@
   function renderBoard() {
     const count = board.cards.filter(shown).length;
     main.className = 'bi-main';
-    main.innerHTML = `<div class="bi-heading"><div><h2>${esc(board.settings.name)}</h2><p>${filters.archived ? 'Archived cards are kept here until you restore them.' : 'Keep your tasks and conversations in one place.'}</p></div>${!filters.archived ? `<button class="bi-button" data-action="new" data-column="${esc(board.settings.columns[0].id)}">${icon('plus-alt2', 'Add card')}</button>` : ''}</div>
-      <div class="bi-toolbar"><div class="bi-search">${icon('search')}<input id="bi-search" type="search" value="${esc(filters.search)}" placeholder="Search cards…" aria-label="Search cards"></div><label class="screen-reader-text" for="bi-filter-category">Filter by category</label><select id="bi-filter-category">${options(board.settings.categories, filters.category, 'All categories')}</select><label class="screen-reader-text" for="bi-filter-person">Filter by person</label><select id="bi-filter-person"><option value="">Everyone</option><option value="unassigned" ${filters.person === 'unassigned' ? 'selected' : ''}>Unassigned</option>${options(board.users, filters.person)}</select><label class="screen-reader-text" for="bi-filter-view">Card view</label><select id="bi-filter-view"><option value="active" ${!filters.archived ? 'selected' : ''}>Active cards</option><option value="archive" ${filters.archived ? 'selected' : ''}>Archived cards</option></select>${filters.search || filters.category || filters.person ? '<button class="bi-text-button" data-action="clear-filters">Clear filters</button>' : ''}<span id="bi-count" class="bi-total">${count} ${count === 1 ? 'card' : 'cards'}</span></div>
+    main.innerHTML = `<div class="bi-toolbar"><div class="bi-search">${icon('search')}<input id="bi-search" type="search" value="${esc(filters.search)}" placeholder="Search cards…" aria-label="Search cards"></div><label class="screen-reader-text" for="bi-filter-category">Filter by category</label><select id="bi-filter-category">${options(board.settings.categories, filters.category, 'All categories')}</select><label class="screen-reader-text" for="bi-filter-person">Filter by person</label><select id="bi-filter-person"><option value="">Everyone</option><option value="unassigned" ${filters.person === 'unassigned' ? 'selected' : ''}>Unassigned</option>${options(board.users, filters.person)}</select>${filters.search || filters.category || filters.person ? '<button class="bi-text-button" data-action="clear-filters">Clear filters</button>' : ''}<span id="bi-count" class="bi-total">${count} ${count === 1 ? 'card' : 'cards'}</span>${!filters.archived ? `<button class="bi-button bi-toolbar-action" data-action="new" data-column="${esc(board.settings.columns[0].id)}">${icon('plus-alt2', 'Add card')}</button>` : (cfg.admin && board.cards.some(c => c.archived) ? `<button class="bi-button bi-button--danger bi-toolbar-action" data-action="purge-request">${icon('trash-2', 'Delete all forever')}</button>` : '')}</div>
       <div class="bi-board" aria-label="${esc(board.settings.name)}">${board.settings.columns.map(col => {
         const cards = board.cards.filter(c => c.column === col.id && shown(c));
-        return `<section class="bi-column" data-column="${esc(col.id)}" aria-label="${esc(col.name)}"><div class="bi-column-heading"><h3>${esc(col.name)}</h3><span class="bi-column-count">${cards.length}</span></div><div class="bi-card-list" data-column="${esc(col.id)}">${cards.map(cardHTML).join('')}</div><p class="bi-column-empty" ${cards.length ? 'hidden' : ''}>${filters.archived ? 'No archived cards' : (filters.search || filters.category || filters.person) ? 'No matching cards' : 'Nothing here yet'}</p>${!filters.archived ? `<button class="bi-add-card" data-action="new" data-column="${esc(col.id)}">${icon('plus-alt2', 'Add card')}</button>` : ''}</section>`;
+        return `<section class="bi-column" data-column="${esc(col.id)}" aria-label="${esc(col.name)}"><div class="bi-column-heading"><h3>${esc(col.name)}</h3><span class="bi-column-count">${cards.length}</span>${cfg.admin && !filters.archived ? `<button type="button" class="bi-icon-button bi-column-remove" data-action="column-edit" data-column="${esc(col.id)}" aria-label="Edit column ${esc(col.name)}" title="Edit column">${icon('pencil')}</button>` : ''}</div><div class="bi-card-list" data-column="${esc(col.id)}">${cards.map(cardHTML).join('')}</div><p class="bi-column-empty" ${cards.length ? 'hidden' : ''}>${filters.archived ? 'No archived cards' : (filters.search || filters.category || filters.person) ? 'No matching cards' : 'Nothing here yet'}</p>${!filters.archived ? `<button class="bi-add-card" data-action="new" data-column="${esc(col.id)}">${icon('plus-alt2', 'Add card')}</button>` : ''}</section>`;
       }).join('')}${columnComposerHTML()}</div>${filters.search || filters.category || filters.person ? '<p class="bi-board-help">Clear filters to move cards.</p>' : ''}`;
     installSorting();
   }
@@ -223,9 +222,14 @@
     }
     finishClosePanel();
   }
+  function closeLayer() {
+    if (!layer.children.length || window.matchMedia('(prefers-reduced-motion: reduce)').matches) { layer.innerHTML = ''; return; }
+    layer.classList.add('bi-closing');
+    setTimeout(() => { if (layer.classList.contains('bi-closing')) { layer.innerHTML = ''; layer.classList.remove('bi-closing'); } }, 200);
+  }
   function finishClosePanel() {
     if(saving) return;
-    closeColorPicker(); disposePreviews(); panel = null; layer.innerHTML = ''; document.body.classList.remove('bi-panel-open');
+    closeColorPicker(); disposePreviews(); panel = null; closeLayer(); document.body.classList.remove('bi-panel-open');
     if(lastFocus?.isConnected) lastFocus.focus(); else main.querySelector('button')?.focus();
   }
   function todoColumn() {
@@ -272,13 +276,14 @@
   function renderPanel() {
     const card = panel.card;
     const disabled = card.archived ? 'disabled' : '';
-    layer.innerHTML = `<div class="bi-backdrop" data-action="close"></div><section class="bi-drawer" role="dialog" aria-modal="true" aria-labelledby="bi-panel-heading"><header class="bi-drawer-header"><h2 id="bi-panel-heading" tabindex="-1">${card.id ? card.archived ? 'Archived card' : 'Card details' : 'New card'}</h2><div class="bi-drawer-header-actions">${card.id ? `<button type="button" class="bi-icon-button ${!card.archived ? 'bi-icon-button--archive' : ''}" data-action="archive-request" aria-label="${card.archived ? 'Restore card' : 'Archive card'}" title="${card.archived ? 'Restore card' : 'Archive card'}">${icon(card.archived ? 'archive-restore' : 'trash-2')}</button>` : ''}<button type="button" class="bi-icon-button" data-action="close" aria-label="Close card">${icon('no-alt')}</button></div></header><div class="bi-drawer-scroll">
+    layer.classList.remove('bi-closing');
+    layer.innerHTML = `<div class="bi-backdrop" data-action="close"></div><section class="bi-drawer" role="dialog" aria-modal="true" aria-labelledby="bi-panel-heading"><header class="bi-drawer-header"><h2 id="bi-panel-heading" tabindex="-1">${card.id ? card.archived ? 'Archived card' : 'Card details' : 'New card'}</h2><div class="bi-drawer-header-actions">${card.id ? `<button type="button" class="bi-icon-button ${!card.archived ? 'bi-icon-button--archive' : ''}" data-action="archive-request" aria-label="${card.archived ? 'Restore card' : 'Archive card'}" title="${card.archived ? 'Restore card' : 'Archive card'}">${icon(card.archived ? 'archive-restore' : 'archive')}</button>` : ''}${card.id && card.archived && cfg.admin ? `<button type="button" class="bi-icon-button bi-icon-button--archive" data-action="delete-request" data-kind="card" aria-label="Delete forever" title="Delete forever">${icon('trash-2')}</button>` : ''}<button type="button" class="bi-icon-button" data-action="close" aria-label="Close card">${icon('no-alt')}</button></div></header><div class="bi-drawer-scroll">
       <div id="bi-discard" class="bi-inline-confirm" hidden><h3>Discard this comment draft?</h3><p>Your card changes are saved. This comment has not been posted.</p><div class="bi-actions"><button id="bi-keep-editing" class="bi-button bi-button--quiet" data-action="keep">Keep editing</button><button class="bi-button bi-button--danger" data-action="discard">Discard comment</button></div></div>
       <form id="bi-card-form"><div id="bi-card-error" class="bi-error" role="alert" tabindex="-1" hidden></div><div id="bi-card-save-failure" class="bi-save-failure" hidden><button type="button" class="bi-button bi-button--quiet" data-action="discard-unsaved">Discard changes and close</button><p class="bi-help">Unsaved card edits and comment drafts will be discarded.</p></div><div class="bi-field"><label for="bi-title">Title</label><input id="bi-title" name="title" class="bi-title-input" type="text" value="${esc(card.title)}" maxlength="200" required placeholder="What needs doing?" ${disabled}></div><div class="bi-field"><label for="bi-description">Description</label><textarea id="bi-description" name="description" rows="4" maxlength="20000" placeholder="Add a little context…" ${disabled}>${esc(card.description)}</textarea></div>${taskImagesHTML(card)}<div class="bi-card-fields">${assigneesHTML(card)}<div class="bi-field bi-field--full"><div class="bi-category-heading"><label id="bi-category-label">Category</label>${!card.archived ? '<button type="button" class="bi-text-button bi-category-toggle" data-action="categories">Edit categories</button>' : ''}</div><input id="bi-category" type="hidden" name="category" value="${esc(card.category)}"><div id="bi-category-options" class="bi-category-options" role="group" aria-labelledby="bi-category-label">${categoryBubblesHTML(card.category,card.archived)}</div>${!card.archived ? categoryEditorHTML() : ''}</div></div><div class="bi-actions">${!card.archived && !card.id ? '<button class="bi-button" type="submit">Create card</button>' : card.archived ? '<span class="bi-help">Restore this card to edit it.</span>' : ''}<span id="bi-save-status" class="bi-help" aria-live="polite"></span></div></form>
       ${card.id ? `<section class="bi-comments" aria-label="Comments"><h3>Comments <span id="bi-comment-count" class="bi-column-count">${panel.comments.length}</span></h3><div id="bi-comment-list">${commentsHTML()}</div>${!card.archived ? `<form id="bi-comment-form"><label for="bi-comment-text">Add a comment</label><textarea id="bi-comment-text" name="comment" rows="3" maxlength="10000" placeholder="Write a comment…"></textarea><div id="bi-image-previews" class="bi-image-previews"></div><div class="bi-comment-actions"><div class="bi-media-actions"><button type="button" class="bi-button bi-button--quiet" data-action="media-upload">Upload</button><button type="button" class="bi-button bi-button--quiet" data-action="media-select">Select</button></div><button type="submit" class="bi-button" disabled>Post comment</button></div><p class="bi-help">Choose images from your library, or drop and paste them here. Up to 10 images, ${Math.floor(cfg.maxUpload / 1048576)} MB each.</p><div id="bi-comment-error" class="bi-error" role="alert" tabindex="-1" hidden></div></form>` : ''}</section>` : '<p class="bi-help bi-new-help">Create the card first, then add comments.</p>'}
     </div></section>`;
     document.body.classList.add('bi-panel-open');
-    document.getElementById(card.archived ? 'bi-panel-heading' : 'bi-title')?.focus();
+    document.getElementById(card.archived ? 'bi-panel-heading' : 'bi-title')?.focus({preventScroll:true});
     renderPreviews(); updateCommentState();
   }
   function commentsHTML() {
@@ -349,6 +354,78 @@
     modalLayer.innerHTML = `<div class="bi-confirm-backdrop" data-action="archive-dismiss"></div><section class="bi-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bi-archive-heading"><h2 id="bi-archive-heading">Archive this card?</h2><p><strong>${esc(panel.card.title)}</strong> will move to Archived cards. You can restore it at any time.</p><div id="bi-archive-error" class="bi-error" role="alert" hidden></div><div class="bi-actions"><button type="button" class="bi-button bi-button--quiet" data-action="archive-dismiss">Keep card</button><button type="button" class="bi-button bi-button--danger" data-action="archive-confirm">${icon('archive','Archive card')}</button></div></section>`;
     modalLayer.querySelector('button').focus();
   }
+  let quickArchive = null;
+  function requestCardArchive(id) {
+    const card = board.cards.find(c => c.id === id);
+    if (saving || !card) return;
+    quickArchive = card; archiveFocus = document.activeElement;
+    modalLayer.innerHTML = `<div class="bi-confirm-backdrop" data-action="archive-dismiss"></div><section class="bi-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bi-archive-heading"><h2 id="bi-archive-heading">Archive this card?</h2><p><strong>${esc(card.title)}</strong> will move to Archived cards. You can restore it at any time.</p><div id="bi-archive-error" class="bi-error" role="alert" hidden></div><div class="bi-actions"><button type="button" class="bi-button bi-button--quiet" data-action="archive-dismiss">Keep card</button><button type="button" class="bi-button bi-button--danger" data-action="card-archive-confirm">${icon('archive','Archive card')}</button></div></section>`;
+    modalLayer.querySelector('button').focus();
+  }
+  async function confirmCardArchive() {
+    if (saving || !quickArchive) return;
+    saving = true; modalLayer.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try {
+      await api(`cards/${quickArchive.id}`, {method:'PATCH', body:{version:quickArchive.version, archived:true}});
+      quickArchive = null; saving = false; closeArchive(false);
+      await loadBoard(); toast('Card archived. You can restore it from Archived cards.');
+    } catch (e) {
+      saving = false; modalLayer.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      errorIn('bi-archive-error', e.message);
+    }
+  }
+  function openColumnEdit(id, keepName) {
+    if (saving) return;
+    const cols = board.settings.columns, index = cols.findIndex(c => c.id === id), col = cols[index]; if (!col) return;
+    if (!modalLayer.children.length) archiveFocus = document.activeElement;
+    modalLayer.innerHTML = `<div class="bi-confirm-backdrop" data-action="archive-dismiss"></div><section class="bi-confirm-dialog bi-column-dialog" role="dialog" aria-modal="true" aria-labelledby="bi-archive-heading"><h2 id="bi-archive-heading">Edit column</h2><button type="button" class="bi-icon-button bi-dialog-close" data-action="archive-dismiss" aria-label="Close" title="Close">${icon('no-alt')}</button><form id="bi-column-edit-form" data-column="${esc(id)}" novalidate><div class="bi-field"><label for="bi-column-edit-name">Column name</label><input id="bi-column-edit-name" type="text" maxlength="60" value="${esc(keepName ?? col.name)}"></div><div class="bi-field"><span class="bi-field-label">Position</span><div class="bi-column-order"><button type="button" class="bi-button bi-button--quiet" data-action="column-move" data-dir="-1" ${index === 0 ? 'disabled' : ''}>${icon('chevron-left', 'Move left')}</button><button type="button" class="bi-button bi-button--quiet" data-action="column-move" data-dir="1" ${index === cols.length - 1 ? 'disabled' : ''}>Move right${icon('chevron-right')}</button></div></div><div id="bi-archive-error" class="bi-error" role="alert" hidden></div><div class="bi-actions bi-column-actions"><button type="button" class="bi-button bi-button--danger" data-action="column-remove" data-column="${esc(id)}">${icon('trash-2', 'Delete')}</button><button type="submit" class="bi-button">Save</button></div></form></section>`;
+    const input = modalLayer.querySelector('#bi-column-edit-name'); input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+  }
+  async function columnRequest(id, body, close) {
+    if (saving) return;
+    const typed = document.getElementById('bi-column-edit-name')?.value;
+    saving = true;
+    try {
+      const result = await api(`columns/${id}`, {method:'PATCH', body:{...body, revision:board.revision}});
+      board.settings.columns = result.columns; board.revision = result.revision; saving = false; renderBoard();
+      if (close) { closeArchive(false); toast('Column updated.'); } else openColumnEdit(id, typed);
+    } catch (e) { saving = false; errorIn('bi-archive-error', e.message); }
+  }
+  function saveColumnEdit(form) {
+    const col = board.settings.columns.find(c => c.id === form.dataset.column), name = document.getElementById('bi-column-edit-name').value.trim();
+    if (!col) return;
+    if (!name) { errorIn('bi-archive-error', 'Give your column a name.'); return; }
+    if (name === col.name) { closeArchive(); return; }
+    columnRequest(col.id, {name}, true);
+  }
+  let pendingDelete = null;
+  function requestDelete(kind, id) {
+    if (saving) return;
+    pendingDelete = {kind, id}; let title, text, label;
+    if (kind === 'card') { if (!panel?.card.id) return; title = 'Delete this card forever?'; text = `<strong>${esc(panel.card.title)}</strong>, its comments and the images uploaded to it will be removed from the database. This cannot be undone.`; label = 'Delete forever'; }
+    else if (kind === 'purge') { const n = board.cards.filter(c => c.archived).length; title = 'Delete all archived cards?'; text = `${n} archived ${n === 1 ? 'card' : 'cards'}, their comments and uploaded images will be removed from the database. This cannot be undone.`; label = 'Delete all forever'; }
+    else { const col = board.settings.columns.find(c => c.id === id); title = 'Delete this column?'; text = `<strong>${esc(col?.name || '')}</strong> will be deleted from the board. Archived cards that were in it move to the first column.`; label = icon('trash-2', 'Delete column'); }
+    archiveFocus = document.activeElement;
+    modalLayer.innerHTML = `<div class="bi-confirm-backdrop" data-action="archive-dismiss"></div><section class="bi-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bi-archive-heading"><h2 id="bi-archive-heading">${title}</h2><p>${text}</p><div id="bi-archive-error" class="bi-error" role="alert" hidden></div><div class="bi-actions"><button type="button" class="bi-button bi-button--quiet" data-action="archive-dismiss">Cancel</button><button type="button" class="bi-button bi-button--danger" data-action="delete-confirm">${label}</button></div></section>`;
+    modalLayer.querySelector('button').focus();
+  }
+  async function confirmDelete() {
+    if (saving || !pendingDelete) return;
+    const {kind, id} = pendingDelete; saving = true;
+    modalLayer.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try {
+      let message;
+      if (kind === 'card') { await api(`cards/${id}`, {method:'DELETE'}); message = 'Card deleted forever.'; }
+      else if (kind === 'purge') { const result = await api('cards/archived', {method:'DELETE'}); message = `${result.deleted} ${result.deleted === 1 ? 'card' : 'cards'} deleted forever.`; }
+      else { await api(`columns/${id}?revision=${board.revision}`, {method:'DELETE'}); message = 'Column deleted.'; }
+      pendingDelete = null; saving = false; closeArchive(false);
+      if (kind === 'card') finishClosePanel();
+      await loadBoard(); toast(message);
+    } catch (e) {
+      saving = false; modalLayer.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      errorIn('bi-archive-error', e.message);
+    }
+  }
   async function archiveCard() {
     if(saving) return;
     if(commentDirty()) { toast('Post or discard your comment before archiving this card.',true); return; }
@@ -413,7 +490,7 @@
     modalLayer.innerHTML = `<div class="bi-image-backdrop" data-action="image-close"></div><section class="bi-image-dialog" role="dialog" aria-modal="true" aria-label="Image preview"><button class="bi-icon-button" data-action="image-close" aria-label="Close image">${icon('no-alt')}</button><img src="${esc(image.url)}" alt="${esc(image.name)}"></section>`;
     modalLayer.querySelector('button').focus();
   }
-  if(!cfg.settings) jQuery.ajaxPrefilter((options) => {
+  jQuery.ajaxPrefilter((options) => {
     if(!/admin-ajax\.php(?:\?|$)/.test(options.url) || typeof options.data !== 'string') return;
     const params = new URLSearchParams(options.data);
     if(!['query-attachments','get-attachment'].includes(params.get('action'))) return;
@@ -459,27 +536,47 @@
     const s = settingsData.settings;
     main.className = 'bi-main bi-main--settings';
     const folderValid = settingsData.folders.some(f => f.id === s.folder_id);
-    main.innerHTML = `<div class="bi-heading"><div><h2>Board settings</h2><p>The essentials for your board and your team.</p></div>${cfg.boardAccess !== false ? `<a class="bi-button bi-button--quiet" href="${esc(cfg.boardUrl)}">Back to board</a>` : ''}</div><form id="bi-settings-form"><div id="bi-settings-error" class="bi-error" role="alert" tabindex="-1" hidden></div><section class="bi-settings-section"><div class="bi-settings-intro"><h3>Your board</h3><p>One shared place for the work.</p></div><div class="bi-settings-controls"><div class="bi-field"><label for="bi-board-name">Board name</label><input id="bi-board-name" name="board_name" type="text" value="${esc(s.name)}" maxlength="100" required></div></div></section>
+    main.innerHTML = `<div class="bi-heading"><div><h2>Board settings</h2><p>The essentials for your board and your team.</p></div></div><form id="bi-settings-form"><div id="bi-settings-error" class="bi-error" role="alert" tabindex="-1" hidden></div><section class="bi-settings-section"><div class="bi-settings-intro"><h3>Your board</h3><p>One shared place for the work.</p></div><div class="bi-settings-controls"><div class="bi-field"><label for="bi-board-name">Board name</label><input id="bi-board-name" name="board_name" type="text" value="${esc(s.name)}" maxlength="100" required></div></div></section>
       <section class="bi-settings-section"><div class="bi-settings-intro"><h3>User roles</h3><p>Choose who can use Boardino and be assigned to tasks.</p></div><div class="bi-settings-controls"><div class="bi-members" role="group" aria-label="Allowed user roles">${settingsData.roles.map(role => `<label class="bi-member"><input type="checkbox" name="role" value="${esc(role.id)}" ${(s.roles === null ? ['administrator'] : s.roles).includes(role.id) ? 'checked' : ''}><span>${esc(role.name)}</span></label>`).join('')}</div><p class="bi-help">Everyone in a selected role can use the board. Administrators can always manage these settings.</p>${settingsData.legacy_access ? '<p class="bi-help">Your existing individual access stays active until you save roles.</p>' : ''}</div></section>
-      <section class="bi-settings-section"><div class="bi-settings-intro"><h3>Columns</h3><p>The steps a card moves through.</p></div><div class="bi-settings-controls"><div id="bi-columns" class="bi-settings-rows" data-kind="columns">${s.columns.map(c => settingsRow(c,'columns')).join('')}</div><button type="button" class="bi-button bi-button--quiet" data-action="add-row" data-kind="columns">${icon('plus-alt2','Add column')}</button><p class="bi-help">Use the arrows to reorder columns. Move all cards out before removing a column.</p></div></section>
+      <section class="bi-settings-section"><div class="bi-settings-intro"><h3>Auto-archive</h3><p>Keep the Done column tidy.</p></div><div class="bi-settings-controls"><div class="bi-field"><label for="bi-auto-archive">Archive cards after (days)</label><input id="bi-auto-archive" name="auto_archive_days" type="number" min="0" max="365" step="1" value="${Number(s.auto_archive_days ?? 30)}"><p class="bi-help">Cards that stay in the Done column this long move to Archived cards. Use 0 to switch it off.</p></div></div></section>
       <section class="bi-settings-section"><div class="bi-settings-intro"><h3>Categories</h3><p>A simple label to tell cards apart.</p></div><div class="bi-settings-controls"><div id="bi-categories" class="bi-settings-rows" data-kind="categories">${s.categories.map(c => settingsRow(c,'categories')).join('')}</div><button type="button" class="bi-button bi-button--quiet" data-action="add-row" data-kind="categories">${icon('plus-alt2','Add category')}</button><p class="bi-help">Each card has one category. Removing a category keeps its cards.</p></div></section>
-      <section class="bi-settings-section"><div class="bi-settings-intro"><h3>Images</h3><p>Images are saved in the WordPress Media Library.</p></div><div class="bi-settings-controls"><div class="bi-field"><label for="bi-media-folder">Media folder</label><select id="bi-media-folder" name="folder_id" ${!settingsData.folderino ? 'disabled' : ''}><option value="0">Media Library — no folder</option>${!settingsData.folderino && s.folder_id ? `<option value="${s.folder_id}" selected>Saved Folderino folder (currently unavailable)</option>` : ''}${settingsData.folderino && s.folder_id && !folderValid ? '<option value="" selected disabled>Selected folder no longer exists</option>' : ''}${options(settingsData.folders, s.folder_id)}</select></div><p class="bi-help">${settingsData.folderino ? 'Choose a Folderino folder for new task and comment images. Existing images stay in their current folders.' : 'Folderino is optional. Images still upload normally while it is inactive. Your saved folder choice will be used again when Folderino is active.'}</p>${settingsData.folderino ? '<p class="bi-help">Create and organize folders in <a href="'+esc(cfg.boardUrl.replace('admin.php?page=boardino','upload.php'))+'">Media Library</a>.</p>' : ''}</div></section><div class="bi-settings-save"><button class="bi-button" type="submit">Save settings</button><span id="bi-settings-status" class="bi-help" role="status"></span></div></form>`;
+      <section class="bi-settings-section"><div class="bi-settings-intro"><h3>Images</h3><p>Images are saved in the WordPress Media Library.</p></div><div class="bi-settings-controls"><div class="bi-field"><label for="bi-media-folder">Media folder</label><select id="bi-media-folder" name="folder_id" ${!settingsData.folderino ? 'disabled' : ''}><option value="0">Media Library — no folder</option>${!settingsData.folderino && s.folder_id ? `<option value="${s.folder_id}" selected>Saved Folderino folder (currently unavailable)</option>` : ''}${settingsData.folderino && s.folder_id && !folderValid ? '<option value="" selected disabled>Selected folder no longer exists</option>' : ''}${options(settingsData.folders, s.folder_id)}</select></div><p class="bi-help">${settingsData.folderino ? 'Choose a Folderino folder for new task and comment images. Existing images stay in their current folders.' : 'Folderino is optional. Images still upload normally while it is inactive. Your saved folder choice will be used again when Folderino is active.'}</p>${settingsData.folderino ? '<p class="bi-help">Create and organize folders in <a href="'+esc(cfg.boardUrl.replace('admin.php?page=boardino','upload.php'))+'">Media Library</a>.</p>' : ''}</div></section></form>`;
   }
   function readSettings() {
     const form = document.getElementById('bi-settings-form');
     const rows = kind => [...document.querySelectorAll(`#bi-${kind} .bi-settings-row`)].map(row => ({id:row.dataset.id, name:row.querySelector('input').value, ...(kind === 'categories' ? {color:row.querySelector('.bi-color-value').value} : {})}));
-    return {name:form.elements.board_name.value, roles:[...form.querySelectorAll('input[name="role"]:checked')].map(i => i.value), folder_id:Number(form.elements.folder_id.value), columns:rows('columns'), categories:rows('categories'), revision:settingsData.revision};
+    return {name:form.elements.board_name.value, roles:[...form.querySelectorAll('input[name="role"]:checked')].map(i => i.value), folder_id:Number(form.elements.folder_id.value), columns:settingsData.settings.columns, categories:rows('categories'), auto_archive_days:Number(form.elements.auto_archive_days.value || 0), revision:settingsData.revision};
   }
   let settingsBaseline = '';
   async function loadSettings() { settingsData = await api('settings'); cfg.boardAccess = settingsData.boardAccess; renderSettings(); settingsBaseline = JSON.stringify(readSettings()); }
-  async function saveSettings(form) {
-    if (saving) return;
-    const values = readSettings(); saving = true; setBusy(form, true, 'Saving…'); document.getElementById('bi-settings-error').hidden = true;
-    try { await api('settings', {method:'POST', body:values}); await loadSettings(); document.getElementById('bi-settings-status').textContent = 'Settings saved'; }
-    catch (e) { errorIn('bi-settings-error', e.message); }
-    finally { saving = false; if (form.isConnected) { setBusy(form,false); if (!settingsData.folderino) form.elements.folder_id.disabled = true; } }
+  let autosaveTimer = null;
+  function queueAutosave(delay = 600) {
+    if (!cfg.settings || !document.getElementById('bi-settings-form')) return;
+    clearTimeout(autosaveTimer); autosaveTimer = setTimeout(autosaveSettings, delay);
   }
-  document.getElementById('boardino').addEventListener('click', event => {
+  // Saves whatever changed. Returns true when nothing is left unsaved.
+  async function autosaveSettings() {
+    clearTimeout(autosaveTimer);
+    if (!cfg.settings || !document.getElementById('bi-settings-form')) return true;
+    const values = readSettings(), snapshot = JSON.stringify(values);
+    if (snapshot === settingsBaseline) return true;
+    if (!values.name.trim() || values.categories.some(c => !c.name.trim())) return false;
+    if (saving) { queueAutosave(300); return false; }
+    saving = true;
+    try {
+      await api('settings', {method:'POST', body:values});
+      const fresh = await api('settings');
+      settingsData.settings = fresh.settings; settingsData.revision = fresh.revision; settingsData.legacy_access = fresh.legacy_access; cfg.boardAccess = fresh.boardAccess;
+      settingsBaseline = JSON.stringify({...values, revision: fresh.revision});
+      toast('Settings saved');
+      if (JSON.stringify(readSettings()) !== settingsBaseline) queueAutosave(300);
+      return true;
+    } catch (e) { toast(e.message, true); return false; }
+    finally { saving = false; }
+  }
+  main.addEventListener('input', event => { if (cfg.settings) queueAutosave(event.target.type === 'checkbox' ? 150 : 700); });
+  main.addEventListener('change', event => { if (cfg.settings) queueAutosave(150); });
+  document.getElementById('boardino').addEventListener('click', () => { if (cfg.settings) queueAutosave(300); });  document.getElementById('boardino').addEventListener('click', event => {
     if(colorPicker && !event.target.closest('.bi-color-control')) closeColorPicker();
     const el = event.target.closest('[data-action]'); if (!el) return;
     const action = el.dataset.action;
@@ -497,6 +594,19 @@
     if(action === 'archive-request') requestArchive();
     if(action === 'archive-dismiss' && !saving) closeArchive();
     if(action === 'archive-confirm') archiveCard();
+    if(action === 'card-archive') requestCardArchive(Number(el.dataset.id));
+    if(action === 'card-archive-confirm') confirmCardArchive();
+    if(action === 'delete-request') requestDelete(el.dataset.kind);
+    if(action === 'purge-request') requestDelete('purge');
+    if(action === 'delete-confirm') confirmDelete();
+    if(action === 'column-edit') openColumnEdit(el.dataset.column);
+    if(action === 'column-move') { const form = document.getElementById('bi-column-edit-form'); const index = board.settings.columns.findIndex(c => c.id === form.dataset.column); columnRequest(form.dataset.column, {position: index + Number(el.dataset.dir)}, false); }
+    if(action === 'column-remove') {
+      const id = el.dataset.column, n = board.cards.filter(c => c.column === id && !c.archived).length;
+      if (n) { const text = `Move the ${n} ${n === 1 ? 'card' : 'cards'} out of this column first.`; if (document.getElementById('bi-archive-error')) errorIn('bi-archive-error', text); else toast(text, true); return; }
+      if (board.settings.columns.length < 2) { const text = 'Keep at least one column.'; if (document.getElementById('bi-archive-error')) errorIn('bi-archive-error', text); else toast(text, true); return; }
+      requestDelete('column', id);
+    }
     if(action === 'task-media-upload') openMedia('upload','task');
     if(action === 'task-media-select') openMedia('select','task');
     if(action === 'task-image-remove' && !saving && !panel.card.archived) {
@@ -526,12 +636,13 @@
     if (action === 'row-down' && !saving) { const row = el.closest('.bi-settings-row'); if(row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling,row); el.focus(); }
   });
   document.getElementById('boardino').addEventListener('submit', event => {
-    if (!['bi-card-form','bi-comment-form','bi-settings-form','bi-column-form'].includes(event.target.id)) return;
+    if (!['bi-card-form','bi-comment-form','bi-settings-form','bi-column-form','bi-column-edit-form'].includes(event.target.id)) return;
     event.preventDefault();
     if (event.target.id === 'bi-column-form') addColumn(event.target);
     if (event.target.id === 'bi-card-form') saveCard(event.target);
     if (event.target.id === 'bi-comment-form') postComment(event.target);
-    if (event.target.id === 'bi-settings-form') saveSettings(event.target);
+    if (event.target.id === 'bi-column-edit-form') saveColumnEdit(event.target);
+    if (event.target.id === 'bi-settings-form') autosaveSettings();
   });
   main.addEventListener('input', event => {
     if (event.target.id === 'bi-column-name' && columnDraft) { columnDraft.name = event.target.value; event.target.form.querySelector('[type="submit"]').disabled = !columnDraft.name.trim(); return; }
@@ -543,7 +654,7 @@
   main.addEventListener('change', event => {
     if (event.target.id === 'bi-filter-category') filters.category = event.target.value;
     else if (event.target.id === 'bi-filter-person') filters.person = event.target.value;
-    else if (event.target.id === 'bi-filter-view') filters.archived = event.target.value === 'archive';
+
     else return;
     renderBoard();
   });
@@ -577,7 +688,30 @@
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
   });
+  function setNavCurrent(view) {
+    document.querySelectorAll('.bi-header nav a[data-view]').forEach(a => { if (a.dataset.view === view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  }
+  async function navigate(view, push = true) {
+    const onSettings = !!cfg.settings;
+    if (saving || (view === 'settings' ? onSettings : (!onSettings && filters.archived === (view === 'archive')))) return;
+    if (onSettings && !(await autosaveSettings()) && !window.confirm('Leave without saving your settings?')) return;
+    try {
+      if (view === 'settings') { cfg.settings = true; columnDraft = null; await loadSettings(); }
+      else { filters.archived = view === 'archive'; if (onSettings) { cfg.settings = false; settingsBaseline = ''; await loadBoard(); } else renderBoard(); }
+    } catch (e) { cfg.settings = onSettings; toast(e.message, true); return; }
+    if (push) history.pushState({view}, '', view === 'settings' ? cfg.settingsUrl : cfg.boardUrl + (view === 'archive' ? '&view=archive' : ''));
+    setNavCurrent(view);
+  }
+  document.querySelector('.bi-header').addEventListener('click', event => {
+    const link = event.target.closest('a[data-view]');
+    if (!link || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault(); navigate(link.dataset.view);
+  });
+  window.addEventListener('popstate', () => {
+    const params = new URLSearchParams(window.location.search);
+    navigate(params.get('page') === 'boardino-settings' ? 'settings' : params.get('view') === 'archive' ? 'archive' : 'board', false);
+  });
   window.addEventListener('beforeunload', event => { if (dirty() || (cfg.settings && settingsBaseline && settingsBaseline !== JSON.stringify(readSettings()))) { event.preventDefault(); event.returnValue = ''; } });
   (cfg.settings ? loadSettings() : loadBoard()).catch(e => { main.innerHTML = `<div class="bi-load-error"><h2>Couldn’t load ${cfg.settings ? 'settings' : 'your board'}</h2><p>${esc(e.message)}</p><a class="bi-button" href="${esc(cfg.settings ? cfg.settingsUrl : cfg.boardUrl)}">Try again</a></div>`; });
-  if (!cfg.settings) setInterval(async () => { if (!panel && !columnDraft && !saving && !dragging && document.visibilityState === 'visible') { try { const fresh = await api('board'); if (board && (fresh.revision !== board.revision || JSON.stringify(fresh.users) !== JSON.stringify(board.users))) { board = fresh; renderBoard(); } } catch (_) { /* Keep a usable board during temporary connection loss. */ } } }, 30000);
+  setInterval(async () => { if (!cfg.settings && !panel && !columnDraft && !saving && !dragging && document.visibilityState === 'visible') { try { const fresh = await api('board'); if (board && (fresh.revision !== board.revision || JSON.stringify(fresh.users) !== JSON.stringify(board.users))) { board = fresh; renderBoard(); } } catch (_) { /* Keep a usable board during temporary connection loss. */ } } }, 30000);
 })();

@@ -10,7 +10,7 @@ final class Boardino {
         return array(
             'name' => 'My board', 'roles' => array( 'administrator' ), 'members' => array(), 'folder_id' => 0,
             'columns' => array( array( 'id' => 'todo', 'name' => 'To do' ), array( 'id' => 'doing', 'name' => 'Doing' ), array( 'id' => 'done', 'name' => 'Done' ) ),
-            'categories' => array(),
+            'categories' => array(), 'auto_archive_days' => 30,
         );
     }
     public static function settings() {
@@ -31,6 +31,37 @@ final class Boardino {
         add_filter( 'wp_prepare_attachment_for_js', array( __CLASS__, 'media_attachment' ), 20, 3 );
         add_action( 'add_attachment', array( __CLASS__, 'media_uploaded' ) );
         add_filter( 'plugin_action_links_' . plugin_basename( BOARDINO_FILE ), array( __CLASS__, 'plugin_links' ) );
+        add_action( 'init', array( __CLASS__, 'schedule_auto_archive' ) );
+        add_action( 'boardino_auto_archive', array( __CLASS__, 'auto_archive' ) );
+    }
+    public static function schedule_auto_archive() {
+        if ( ! wp_next_scheduled( 'boardino_auto_archive' ) ) { wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'boardino_auto_archive' ); }
+    }
+    public static function deactivate() { wp_clear_scheduled_hook( 'boardino_auto_archive' ); }
+    private static function done_column() {
+        foreach ( self::settings()['columns'] as $column ) {
+            if ( 'done' === $column['id'] || 'done' === strtolower( trim( $column['name'] ) ) ) { return $column['id']; }
+        }
+        return '';
+    }
+    // Moves cards that stayed in the Done column for the chosen number of days to the archive.
+    public static function auto_archive() {
+        $days = (int) self::settings()['auto_archive_days']; $done = self::done_column();
+        if ( $days < 1 || '' === $done ) { return 0; }
+        $count = self::mutate( static function() use ( $days, $done ) {
+            $limit = time() - $days * DAY_IN_SECONDS; $count = 0;
+            $ids = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'suppress_filters' => true, 'meta_key' => '_bi_column', 'meta_value' => $done, 'meta_query' => array( array( 'key' => '_bi_archived', 'compare' => 'NOT EXISTS' ) ) ) );
+            foreach ( $ids as $id ) {
+                $since = (int) get_post_meta( $id, '_bi_column_since', true );
+                if ( ! $since ) { $since = (int) strtotime( get_post( $id )->post_modified_gmt . ' UTC' ); }
+                if ( $since > $limit ) { continue; }
+                update_post_meta( $id, '_bi_archived', time() );
+                update_post_meta( $id, '_bi_version', (int) get_post_meta( $id, '_bi_version', true ) + 1 );
+                $count++;
+            }
+            return $count;
+        } );
+        return is_wp_error( $count ) ? 0 : $count;
     }
     private static function folderino_available() {
         if ( ! apply_filters( 'boardino_use_folderino', true ) || ! defined( 'FOLDERINO_TAX' ) || ! defined( 'FOLDERINO_DIR' ) || function_exists( 'rdb_mf_get_tree' ) ) { return false; }
@@ -111,8 +142,12 @@ final class Boardino {
         $settings_screen = current_user_can( 'manage_options' ) && ( 'boardino-settings' === sanitize_key( $_GET['page'] ?? '' ) || ! self::allowed() );
         if ( ! self::allowed() && ! $settings_screen ) { wp_die( esc_html__( 'You do not have access to this board.', 'boardino' ) ); }
         echo '<div id="boardino" class="boardino"><header class="bi-header"><a class="bi-brand" href="' . esc_url( admin_url( 'admin.php?page=boardino' ) ) . '"><img class="bi-brand-icon" src="' . esc_url( plugins_url( 'assets/boardino-icon.svg', BOARDINO_FILE ) ) . '" alt=""><h1>Boardino</h1></a><nav aria-label="Boardino">';
-        if ( self::allowed() ) { echo '<a href="' . esc_url( admin_url( 'admin.php?page=boardino' ) ) . '">Board</a>'; }
-        if ( current_user_can( 'manage_options' ) ) { echo '<a href="' . esc_url( admin_url( 'admin.php?page=boardino-settings' ) ) . '">Settings</a>'; }
+        if ( self::allowed() ) {
+            $archive = 'archive' === sanitize_key( $_GET['view'] ?? '' ) && 'boardino' === sanitize_key( $_GET['page'] ?? '' );
+            echo '<a href="' . esc_url( admin_url( 'admin.php?page=boardino' ) ) . '" data-view="board"' . ( ! $archive && 'boardino' === sanitize_key( $_GET['page'] ?? '' ) ? ' aria-current="page"' : '' ) . '>Board</a>';
+            echo '<a href="' . esc_url( admin_url( 'admin.php?page=boardino&view=archive' ) ) . '" data-view="archive"' . ( $archive ? ' aria-current="page"' : '' ) . '>Archive</a>';
+        }
+        if ( current_user_can( 'manage_options' ) ) { echo '<a href="' . esc_url( admin_url( 'admin.php?page=boardino-settings' ) ) . '" data-view="settings"' . ( $settings_screen ? ' aria-current="page"' : '' ) . '>Settings</a>'; }
         echo '</nav></header><hr class="wp-header-end"><main id="bi-main" class="bi-main"><div class="bi-loading" role="status"><span></span><span></span><span></span><p>Loading your board…</p></div></main>';
         if ( $settings_screen ) { Boardino_Updates::screen(); }
         echo '<div id="bi-notice" class="bi-toast" role="status" aria-live="polite" hidden></div><div id="bi-layer"></div><noscript><p>Please enable JavaScript to use Boardino.</p></noscript></div>';
@@ -122,8 +157,10 @@ final class Boardino {
         register_rest_route( self::API, '/board', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'board' ), 'permission_callback' => $member ) );
         register_rest_route( self::API, '/settings', array( array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'get_settings' ), 'permission_callback' => $admin ), array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'save_settings' ), 'permission_callback' => $admin ) ) );
         register_rest_route( self::API, '/columns', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'add_column' ), 'permission_callback' => $admin ) );
+        register_rest_route( self::API, '/columns/(?P<id>[a-z0-9_]+)', array( array( 'methods' => 'DELETE', 'callback' => array( __CLASS__, 'remove_column' ), 'permission_callback' => $admin ), array( 'methods' => 'PATCH', 'callback' => array( __CLASS__, 'edit_column' ), 'permission_callback' => $admin ) ) );
+        register_rest_route( self::API, '/cards/archived', array( 'methods' => 'DELETE', 'callback' => array( __CLASS__, 'delete_archived' ), 'permission_callback' => $admin ) );
         register_rest_route( self::API, '/cards', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'create_card' ), 'permission_callback' => $member ) );
-        register_rest_route( self::API, '/cards/(?P<id>\d+)', array( array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'get_card' ), 'permission_callback' => $member ), array( 'methods' => 'PATCH', 'callback' => array( __CLASS__, 'update_card' ), 'permission_callback' => $member ) ) );
+        register_rest_route( self::API, '/cards/(?P<id>\d+)', array( array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'get_card' ), 'permission_callback' => $member ), array( 'methods' => 'PATCH', 'callback' => array( __CLASS__, 'update_card' ), 'permission_callback' => $member ), array( 'methods' => 'DELETE', 'callback' => array( __CLASS__, 'delete_card' ), 'permission_callback' => $admin ) ) );
         register_rest_route( self::API, '/move', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'move_card' ), 'permission_callback' => $member ) );
         register_rest_route( self::API, '/categories', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'save_category' ), 'permission_callback' => $member ) );
         register_rest_route( self::API, '/cards/(?P<id>\d+)/comments', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'add_comment' ), 'permission_callback' => $member ) );
@@ -230,13 +267,72 @@ final class Boardino {
             return array( 'column' => $column, 'revision' => self::revision() + 1 );
         } );
     }
+    public static function edit_column( $r ) {
+        return self::mutate( static function() use ( $r ) {
+            if ( (int) $r['revision'] !== self::revision() ) { return self::error( 'The board has changed. Please try again.', 409 ); }
+            $settings = self::settings(); $id = sanitize_key( $r['id'] ); $params = $r->get_json_params();
+            $index = array_search( $id, self::ids( $settings['columns'] ), true );
+            if ( false === $index ) { return self::error( 'This column no longer exists.', 404 ); }
+            if ( array_key_exists( 'name', $params ) ) {
+                $name = is_string( $params['name'] ) ? trim( sanitize_text_field( $params['name'] ) ) : '';
+                if ( '' === $name || mb_strlen( $name ) > 60 ) { return self::error( 'Give your column a name of up to 60 characters.' ); }
+                $settings['columns'][ $index ]['name'] = $name;
+            }
+            if ( array_key_exists( 'position', $params ) ) {
+                $to = max( 0, min( count( $settings['columns'] ) - 1, (int) $params['position'] ) );
+                $column = array_splice( $settings['columns'], $index, 1 );
+                array_splice( $settings['columns'], $to, 0, $column );
+            }
+            update_option( self::OPTION, $settings, false );
+            return array( 'columns' => array_values( $settings['columns'] ), 'revision' => self::revision() + 1 );
+        } );
+    }
+    public static function remove_column( $r ) {
+        return self::mutate( static function() use ( $r ) {
+            if ( (int) $r['revision'] !== self::revision() ) { return self::error( 'The board has changed. Please try removing the column again.', 409 ); }
+            $settings = self::settings(); $id = sanitize_key( $r['id'] );
+            $index = array_search( $id, self::ids( $settings['columns'] ), true );
+            if ( false === $index ) { return self::error( 'This column no longer exists.', 404 ); }
+            if ( count( $settings['columns'] ) < 2 ) { return self::error( 'Keep at least one column.' ); }
+            $cards = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'meta_key' => '_bi_column', 'meta_value' => $id ) );
+            $active = array_filter( $cards, static function( $card ) { return ! get_post_meta( $card, '_bi_archived', true ); } );
+            if ( $active ) { return self::error( 'Move the cards out of this column first.' ); }
+            array_splice( $settings['columns'], $index, 1 );
+            // Archived cards stay restorable: they move to the first remaining column.
+            foreach ( $cards as $card ) { update_post_meta( $card, '_bi_column', $settings['columns'][0]['id'] ); update_post_meta( $card, '_bi_version', (int) get_post_meta( $card, '_bi_version', true ) + 1 ); }
+            update_option( self::OPTION, $settings, false );
+            return array( 'removed' => $id, 'revision' => self::revision() + 1 );
+        } );
+    }
+    // Removes one card for good: the card, its comments and the images that were uploaded to it.
+    private static function purge_card( $id ) {
+        foreach ( get_comments( array( 'post_id' => $id, 'type' => 'boardino', 'status' => 'all', 'number' => 0 ) ) as $comment ) { wp_delete_comment( $comment->comment_ID, true ); }
+        $images = get_posts( array( 'post_type' => 'attachment', 'post_status' => 'any', 'posts_per_page' => -1, 'fields' => 'ids', 'meta_key' => '_bi_card', 'meta_value' => $id ) );
+        foreach ( $images as $image ) { wp_delete_attachment( $image, true ); }
+        wp_delete_post( $id, true );
+    }
+    public static function delete_card( $r ) {
+        return self::mutate( static function() use ( $r ) {
+            $p = self::post( $r['id'] ); if ( is_wp_error( $p ) ) { return $p; }
+            if ( ! get_post_meta( $p->ID, '_bi_archived', true ) ) { return self::error( 'Archive this card before deleting it forever.' ); }
+            self::purge_card( $p->ID );
+            return array( 'deleted' => (int) $p->ID );
+        } );
+    }
+    public static function delete_archived() {
+        return self::mutate( static function() {
+            $ids = get_posts( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'posts_per_page' => -1, 'fields' => 'ids', 'suppress_filters' => true, 'meta_query' => array( array( 'key' => '_bi_archived', 'compare' => 'EXISTS' ) ) ) );
+            foreach ( $ids as $id ) { self::purge_card( $id ); }
+            return array( 'deleted' => count( $ids ) );
+        } );
+    }
     public static function save_settings( $r ) {
         return self::mutate( static function() use ( $r ) {
             if ( (int) $r['revision'] !== self::revision() ) { return self::error( 'The board has changed. Reload settings before saving.', 409 ); }
             $old = self::settings(); $new = $r->get_json_params();
             $name = sanitize_text_field( $new['name'] ?? '' );
             if ( ! $name || mb_strlen( $name ) > 100 ) { return self::error( 'Give your board a name of up to 100 characters.' ); }
-            $settings = array( 'name' => $name, 'roles' => array(), 'folder_id' => absint( $new['folder_id'] ?? 0 ), 'columns' => array(), 'categories' => array() );
+            $settings = array( 'name' => $name, 'roles' => array(), 'folder_id' => absint( $new['folder_id'] ?? 0 ), 'columns' => array(), 'categories' => array(), 'auto_archive_days' => min( 365, absint( $new['auto_archive_days'] ?? 30 ) ) );
             foreach ( array( 'columns', 'categories' ) as $key ) {
                 if ( ! isset( $new[$key] ) || ! is_array( $new[$key] ) || count( $new[$key] ) > 30 ) { return self::error( 'Use up to 30 ' . $key . '.' ); }
                 $seen = array();
@@ -327,7 +423,7 @@ final class Boardino {
             $id = wp_insert_post( wp_slash( array( 'post_type' => self::TYPE, 'post_status' => 'private', 'post_title' => $d['title'], 'post_content' => $d['description'], 'post_author' => get_current_user_id(), 'comment_status' => 'closed', 'menu_order' => self::first_order( $d['column'] ) ) ), true );
             if ( is_wp_error( $id ) ) { return $id; }
             self::save_card_meta( $id, $d );
-            update_post_meta( $id, '_bi_version', 1 );
+            update_post_meta( $id, '_bi_version', 1 ); update_post_meta( $id, '_bi_column_since', time() );
             return self::card( get_post( $id ) );
         } );
     }
@@ -339,7 +435,7 @@ final class Boardino {
                 if ( ! is_bool( $r['archived'] ) ) { return self::error( 'Please choose whether to archive or restore this card.' ); }
                 // Keep archives outside WordPress Trash, which is automatically emptied.
                 if ( $r['archived'] ) { update_post_meta( $p->ID, '_bi_archived', time() ); }
-                else { delete_post_meta( $p->ID, '_bi_archived' ); wp_update_post( array( 'ID' => $p->ID, 'menu_order' => self::next_order( get_post_meta( $p->ID, '_bi_column', true ) ) ) ); }
+                else { delete_post_meta( $p->ID, '_bi_archived' ); update_post_meta( $p->ID, '_bi_column_since', time() ); wp_update_post( array( 'ID' => $p->ID, 'menu_order' => self::next_order( get_post_meta( $p->ID, '_bi_column', true ) ) ) ); }
             } else {
                 if ( get_post_meta( $p->ID, '_bi_archived', true ) ) { return self::error( 'Restore this card before editing it.' ); }
                 $data = $r->get_json_params();
@@ -347,7 +443,7 @@ final class Boardino {
                 if ( ! array_key_exists( 'assignees', $data ) && ! array_key_exists( 'assignee', $data ) ) { $data['assignees'] = self::assignee_ids( $p->ID ); }
                 $d = self::validate_card( $data ); if ( is_wp_error( $d ) ) { return $d; }
                 $patch = array( 'ID' => $p->ID, 'post_title' => $d['title'], 'post_content' => $d['description'] );
-                if ( $d['column'] !== get_post_meta( $p->ID, '_bi_column', true ) ) { $patch['menu_order'] = self::next_order( $d['column'] ); }
+                if ( $d['column'] !== get_post_meta( $p->ID, '_bi_column', true ) ) { $patch['menu_order'] = self::next_order( $d['column'] ); update_post_meta( $p->ID, '_bi_column_since', time() ); }
                 $result = wp_update_post( wp_slash( $patch ), true ); if ( is_wp_error( $result ) ) { return $result; }
                 self::save_card_meta( $p->ID, $d );
             }
@@ -368,6 +464,7 @@ final class Boardino {
             $expected = array_values( array_unique( array_merge( array_map( 'intval', $existing ), array( (int) $p->ID ) ) ) ); $sorted = $order;
             sort( $expected ); sort( $sorted );
             if ( $expected !== $sorted ) { return self::error( 'The board has changed. Refresh it before moving this card.', 409 ); }
+            if ( $column !== get_post_meta( $p->ID, '_bi_column', true ) ) { update_post_meta( $p->ID, '_bi_column_since', time() ); }
             update_post_meta( $p->ID, '_bi_column', $column );
             foreach ( $order as $index => $id ) { wp_update_post( array( 'ID' => $id, 'menu_order' => $index ) ); }
             update_post_meta( $p->ID, '_bi_version', (int) get_post_meta( $p->ID, '_bi_version', true ) + 1 );
