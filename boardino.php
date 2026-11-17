@@ -19,7 +19,7 @@ register_activation_hook( __FILE__, array( 'Boardino', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'Boardino', 'deactivate' ) );
 Boardino::boot();
 require_once __DIR__ . '/includes/class-boardino-abilities.php';
-Boardino_Abilities::init();
+Boardino_Abilities::boot();
 
 require_once __DIR__ . '/includes/class-boardino-updates.php';
 Boardino_Updates::boot();
